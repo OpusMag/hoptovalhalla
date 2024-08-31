@@ -1,4 +1,3 @@
-import os
 import pygame
 from pygame import Vector2
 import random
@@ -19,6 +18,7 @@ class Drawable_objects(pygame.sprite.Sprite):
         super().__init__()
         self.color = color
         self.image = pygame.Surface((width, height), pygame.SRCALPHA)
+        self.image.fill(color)
         self.rect = self.image.get_rect(center=pos)
         self.pos = pos
         self.rect.x = self.pos[0]
@@ -121,6 +121,10 @@ class Game:
                     x = random.randint(0, SCREEN_WIDTH - PLATFORM_WIDTH)
                     y = player.rect.top - 120
                     self.create_platform(Vector2(x, y))
+
+            # Check if player falls off the screen
+            if player.rect.top > SCREEN_HEIGHT:
+                running = False
 
             self.update_game()
             self.clock.tick(60)
