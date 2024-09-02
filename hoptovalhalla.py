@@ -8,13 +8,16 @@ SCREEN_HEIGHT = 600
 BUTTON_WIDTH = 200
 BUTTON_HEIGHT = 50
 FONT_SIZE = 30
-PLATFORM_WIDTH = 100
-PLATFORM_HEIGHT = 100
+PLATFORM_WIDTH = 70
+PLATFORM_HEIGHT = 40
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 50
 GRAVITY = Vector2(0, 0.5)
 HORIZONTAL_SPEED = 5
 JUMP_STRENGTH = -15
+MIN_V_JUMP_DISTANCE = 140
+MIN_H_JUMP_DISTANCE = 320
+
 
 # Top parent class, responsible for variables needed to draw an object
 class Drawable_objects(pygame.sprite.Sprite):
@@ -62,11 +65,24 @@ class Player(Moving_objects):
         self.speed += self.acceleration
         self.rect.y += self.speed.y
         self.rect.x += self.speed.x
+        
+class Ravens(Moving_objects):
+    def __init__(self, color, image, width, height, pos):
+        super().__init__(color, image, width, height, pos)
+        self.speed = Vector2(5, 0)  # Move right with a speed of 5 units per frame
+
+    def update(self):
+        # Move the raven
+        self.rect.x += self.speed.x
+
+        # Wrap around if it goes off the right side of the screen
+        if self.rect.left > SCREEN_WIDTH:
+            self.rect.right = 0
 
 # Platform class. Holds the variables for the platform object.
-class Platform(pygame.sprite.Sprite):
+class Platform(Drawable_objects):
     def __init__(self, color, image_path, width, height, pos):
-        super().__init__()
+        super().__init__(color, image_path, width, height, pos)
         if image_path:
             self.image = pygame.image.load(image_path).convert_alpha()
             self.image = pygame.transform.scale(self.image, (width, height))
@@ -169,6 +185,36 @@ class HighscoreMenu:
         self.name = ""
         self.input_active = True
 
+    def update(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                if self.input_active:
+                    if event.key == pygame.K_RETURN:
+                        self.input_active = False
+                        self.save_score()
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.name = self.name[:-1]
+                    else:
+                        self.name += event.unicode
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if self.buttons["restart"].collidepoint(event.pos):
+                    self.restart_game()
+                elif self.buttons["quit"].collidepoint(event.pos):
+                    pygame.quit()
+                    exit()
+
+    def save_score(self):
+        self.game.highscores.append((self.name, self.current_score))
+        self.game.highscores.sort(key=lambda x: x[1], reverse=True)
+        self.game.highscores = self.game.highscores[:10]  # Keep only top 10 scores
+
+    def restart_game(self):
+        self.active = False
+        self.game.reset_game()
+
     def draw(self):
         self.game.screen.fill((0, 0, 0, 128))  # Semi-transparent background
         title = self.font.render("Highscores", True, (255, 255, 255))
@@ -190,30 +236,6 @@ class HighscoreMenu:
 
         pygame.display.flip()
 
-    def update(self):
-        for event in pygame.event.get():
-            if event.type == pygame.KEYDOWN:
-                if self.input_active:
-                    if event.key == pygame.K_RETURN:
-                        self.input_active = False
-                        self.game.highscores.append((self.name, self.current_score))
-                        self.game.highscores = sorted(self.game.highscores, key=lambda x: x[1], reverse=True)[:5]
-                    elif event.key == pygame.K_BACKSPACE:
-                        self.name = self.name[:-1]
-                    else:
-                        self.name += event.unicode
-                else:
-                    if event.key == pygame.K_RETURN:
-                        self.active = False
-                        self.game.menu_active = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                if self.buttons["restart"].collidepoint(event.pos):
-                    self.active = False
-                    self.game.restart_game()
-                elif self.buttons["quit"].collidepoint(event.pos):
-                    pygame.quit()
-                    exit()
-
 # Game class. Responsible for the game loop, most of the collision detection and creating most of the objects apart from the missiles.
 class Game:
     def __init__(self):
@@ -222,10 +244,14 @@ class Game:
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pygame.time.Clock()
         self.player = pygame.sprite.GroupSingle()
+        self.ravens = pygame.sprite.Group()
         self.platforms = pygame.sprite.Group()
         self.all_sprites = pygame.sprite.Group()
         self.score = 0
-        self.highscores = []  # Initialize as an empty list
+        self.highscores = []
+        self.highscore_menu = HighscoreMenu(self)
+        self.settings_menu = SettingsMenu(self)
+        self.settings_active = False
         self.collided_platforms = set()
         self.background_image = pygame.image.load('/home/magnus/dev/hoptovalhalla/background.png').convert()
         self.background_image = pygame.transform.scale(self.background_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -238,13 +264,33 @@ class Game:
         self.player.add(player)
         self.all_sprites.add(player)
         
+    def create_ravens(self, pos):
+        width = 50  # Example width for the raven
+        height = 30  # Example height for the raven
+        ravens = Ravens(None, '/home/magnus/dev/hoptovalhalla/raven.png', width, height, pos)
+        self.ravens.add(ravens)
+        self.all_sprites.add(ravens)
+        
     def create_floor(self, pos):
         self.create_platform(pos, width=PLATFORM_WIDTH, image_path='/home/magnus/dev/hoptovalhalla/floor.png')
 
-    def create_platform(self, pos, width=PLATFORM_WIDTH, image_path='/home/magnus/dev/hoptovalhalla/platform.png'):
+    def create_platform(self, pos, width=PLATFORM_WIDTH, image_path='/home/magnus/dev/hoptovalhalla/platform1.png'):
         platform = Platform(None, image_path, width, PLATFORM_HEIGHT, pos)
         self.platforms.add(platform)
         self.all_sprites.add(platform)
+        
+    def generate_ravens(self):
+        num_ravens = self.score // 25
+
+        for _ in range(num_ravens):
+            x = 0  # Start from the left side of the screen
+            y = random.randint(0, SCREEN_HEIGHT - PLATFORM_HEIGHT)
+            self.create_ravens(Vector2(x, y))
+
+        for _ in range(num_ravens):
+            x = 0  # Start from the left side of the screen
+            y = random.randint(0, SCREEN_HEIGHT - PLATFORM_HEIGHT)
+            self.create_ravens(Vector2(x, y))
 
     def generate_floor(self):
         num_platforms = SCREEN_WIDTH // PLATFORM_WIDTH
@@ -255,17 +301,23 @@ class Game:
 
     def generate_platforms(self):
         if not hasattr(self, 'highest_platform_y'):
-            self.highest_platform_y = SCREEN_HEIGHT - PLATFORM_HEIGHT
+            # Set the initial highest platform position to be the minimum jump distance from the floor
+            self.highest_platform_y = SCREEN_HEIGHT - PLATFORM_HEIGHT - MIN_V_JUMP_DISTANCE
+            self.previous_platform_x = random.randint(0, SCREEN_WIDTH - PLATFORM_WIDTH)
             while self.highest_platform_y > 0:
-                x = random.randint(0, SCREEN_WIDTH - PLATFORM_WIDTH)
+                x = random.randint(max(0, self.previous_platform_x - MIN_H_JUMP_DISTANCE), 
+                                min(SCREEN_WIDTH - PLATFORM_WIDTH, self.previous_platform_x + MIN_H_JUMP_DISTANCE))
                 y = self.highest_platform_y
                 self.create_platform(Vector2(x, y))
-                self.highest_platform_y -= 120
+                self.highest_platform_y -= MIN_V_JUMP_DISTANCE  # Use the minimum jump distance for spacing
+                self.previous_platform_x = x
 
-        x = random.randint(0, SCREEN_WIDTH - PLATFORM_WIDTH)
-        y = self.highest_platform_y - 120
+        x = random.randint(max(0, self.previous_platform_x - MIN_H_JUMP_DISTANCE), 
+                        min(SCREEN_WIDTH - PLATFORM_WIDTH, self.previous_platform_x + MIN_H_JUMP_DISTANCE))
+        y = self.highest_platform_y - MIN_V_JUMP_DISTANCE  # Use the minimum jump distance for spacing
         self.create_platform(Vector2(x, y))
         self.highest_platform_y = y
+        self.previous_platform_x = x
 
     def scroll_screen(self, dy):
         for sprite in self.all_sprites:
@@ -290,6 +342,17 @@ class Game:
         score_text = self.font.render(f"Score: {self.score}", True, (255, 255, 255))
         self.screen.blit(score_text, (SCREEN_WIDTH - score_text.get_width() - 10, 10))
         pygame.display.flip()
+        
+    def reset_game(self):
+        # Reset game state
+        self.player.empty()  # Clear player
+        self.platforms.empty()  # Clear platforms
+        self.all_sprites.empty()  # Clear all sprites
+        self.generate_floor()  # Generate floor
+        self.generate_platforms()  # Generate initial platforms
+        self.score = 0  # Reset score
+        self.highscore_menu.active = False  # Deactivate highscore menu
+        self.create_player()  # Create a new player
 
     def game_loop(self):
         pygame.init()
@@ -307,8 +370,14 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.settings_active = not self.settings_active
 
-            if self.highscore_menu.active:
+            if self.settings_active:
+                self.settings_menu.update()
+                self.settings_menu.draw(self.screen)
+            elif self.highscore_menu.active:
                 self.highscore_menu.update()
                 self.highscore_menu.draw()
             else:
@@ -318,6 +387,7 @@ class Game:
                 if player.rect.top <= SCREEN_HEIGHT // 4:
                     self.scroll_screen(5)
                     self.generate_platforms()
+                    game.generate_ravens()
 
                 if player.rect.top > SCREEN_HEIGHT - 50:
                     # Scroll the screen down until the player reaches the floor
