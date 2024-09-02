@@ -15,7 +15,7 @@ PLAYER_HEIGHT = 50
 GRAVITY = Vector2(0, 0.5)
 HORIZONTAL_SPEED = 5
 JUMP_STRENGTH = -15
-MIN_V_JUMP_DISTANCE = 140
+MIN_V_JUMP_DISTANCE = 100
 MIN_H_JUMP_DISTANCE = 320
 
 
@@ -91,6 +91,10 @@ class Platform(Drawable_objects):
             if color:
                 self.image.fill(color)
         self.rect = self.image.get_rect(topleft=pos)
+        
+class Floor(Drawable_objects):
+    def __init__(self, color, image_path, width, height, pos):
+        super().__init__(color, image_path, width, height, pos)
         
 class Menu(Drawable_objects):
     def __init__(self, game):
@@ -245,6 +249,7 @@ class Game:
         self.clock = pygame.time.Clock()
         self.player = pygame.sprite.GroupSingle()
         self.ravens = pygame.sprite.Group()
+        self.floors = pygame.sprite.Group()
         self.platforms = pygame.sprite.Group()
         self.all_sprites = pygame.sprite.Group()
         self.score = 0
@@ -259,7 +264,7 @@ class Game:
         self.highscore_menu = HighscoreMenu(self)
 
     def create_player(self):
-        pos = Vector2(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50)
+        pos = Vector2(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 200)
         player = Player(None, '/home/magnus/dev/hoptovalhalla/viking.png', PLAYER_WIDTH, PLAYER_HEIGHT, pos)
         self.player.add(player)
         self.all_sprites.add(player)
@@ -271,9 +276,11 @@ class Game:
         self.ravens.add(ravens)
         self.all_sprites.add(ravens)
         
-    def create_floor(self, pos):
-        self.create_platform(pos, width=PLATFORM_WIDTH, image_path='/home/magnus/dev/hoptovalhalla/floor.png')
-
+    def create_floor(self, pos, width=1800, image_path='/home/magnus/dev/hoptovalhalla/platform.png'):
+        floor = Floor(None, image_path, width, 1, pos)
+        self.floors.add(floor) 
+        self.all_sprites.add(floor)
+        
     def create_platform(self, pos, width=PLATFORM_WIDTH, image_path='/home/magnus/dev/hoptovalhalla/platform1.png'):
         platform = Platform(None, image_path, width, PLATFORM_HEIGHT, pos)
         self.platforms.add(platform)
@@ -293,11 +300,9 @@ class Game:
             self.create_ravens(Vector2(x, y))
 
     def generate_floor(self):
-        num_platforms = SCREEN_WIDTH // PLATFORM_WIDTH
-        for i in range(num_platforms):
-            x = i * PLATFORM_WIDTH
-            y = SCREEN_HEIGHT - PLATFORM_HEIGHT
-            self.create_floor(Vector2(x, y))
+        # Position the floor at the bottom of the screen
+        pos = (0, SCREEN_HEIGHT - 1)  # Assuming the floor height is 20 pixels
+        self.create_floor(pos)
 
     def generate_platforms(self):
         if not hasattr(self, 'highest_platform_y'):
@@ -325,16 +330,35 @@ class Game:
 
     def check_collisions(self):
         player = self.player.sprite
-        if player.speed.y > 0:
-            hits = pygame.sprite.spritecollide(player, self.platforms, False)
-            for hit in hits:
-                if hit not in self.collided_platforms:
-                    self.collided_platforms.add(hit)
-                    self.score += 1
-                player.rect.y = hit.rect.top - PLAYER_HEIGHT
-                player.speed.y = 0
-                player.on_ground = True
+        
 
+        if player.speed.y >= 0:
+            # Check collisions with the floor
+            floor_hits = pygame.sprite.spritecollide(player, self.floors, False)
+            for hit in floor_hits:
+                if player.rect.bottom <= hit.rect.top + player.speed.y:
+                    player.rect.y = hit.rect.top - PLAYER_HEIGHT
+                    player.speed.y = 0
+                    player.on_ground = True
+
+            # Check collisions with platforms
+            platform_hits = pygame.sprite.spritecollide(player, self.platforms, False)
+            for hit in platform_hits:
+                if player.rect.bottom <= hit.rect.top + player.speed.y:
+                    if hit not in self.collided_platforms:
+                        self.collided_platforms.add(hit)
+                        self.score += 1
+                    player.rect.y = hit.rect.top - PLAYER_HEIGHT
+                    player.speed.y = 0
+                    player.on_ground = True
+
+            # Check collisions with ravens
+            raven_hits = pygame.sprite.spritecollide(player, self.ravens, False)
+            for hit in raven_hits:
+                if player.rect.left <= hit.rect.right:
+                    self.highscore_menu.active = True
+
+            
     def update_game(self):
         self.screen.blit(self.background_image, (0, 0))
         self.all_sprites.update()
@@ -356,10 +380,12 @@ class Game:
 
     def game_loop(self):
         pygame.init()
-        pygame.display.set_caption('Platform Jumper')
-        self.create_player()
+        pygame.display.set_caption('Hop to Valhalla')
         self.generate_floor()
         self.generate_platforms()
+        self.create_player()
+        global GRAVITY
+        
         
         # Load and play background music
         pygame.mixer.music.load('/home/magnus/dev/hoptovalhalla/hop_to_valhalla.mp3')
@@ -373,7 +399,14 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.settings_active = not self.settings_active
+            
+            player = self.player.sprite  # Access the player object from the group
 
+            if player.on_ground:
+                GRAVITY = Vector2(0, 0)
+            else:
+                GRAVITY = Vector2(0, 0.5)
+                
             if self.settings_active:
                 self.settings_menu.update()
                 self.settings_menu.draw(self.screen)
@@ -387,18 +420,10 @@ class Game:
                 if player.rect.top <= SCREEN_HEIGHT // 4:
                     self.scroll_screen(5)
                     self.generate_platforms()
-                    game.generate_ravens()
 
-                if player.rect.top > SCREEN_HEIGHT - 50:
-                    # Scroll the screen down until the player reaches the floor
-                    while player.rect.bottom < SCREEN_HEIGHT - 1:
-                        self.scroll_screen(-5)
-                        self.update_game()
-                        self.clock.tick(60)
-                    # Show highscore menu and enable name input
-                    self.highscore_menu.show(self.score)
-                    self.score = 0
-                    self.collided_platforms.clear()
+                if player.rect.bottom > SCREEN_HEIGHT - 1 and not player.on_ground:
+                    self.scroll_screen(-5)
+                    self.generate_platforms()
 
                 self.update_game()
                 self.clock.tick(60)
