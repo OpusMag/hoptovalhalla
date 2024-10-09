@@ -1,6 +1,7 @@
 import pygame
 from pygame import Vector2
 import random
+from enum import Enum
 
 # Constants
 SCREEN_WIDTH = 800
@@ -18,9 +19,15 @@ JUMP_STRENGTH = -15
 MIN_V_JUMP_DISTANCE = 100
 MIN_H_JUMP_DISTANCE = 320
 
+# Game States
+class GameState(Enum):
+    RUNNING = 1
+    MENU = 2
+    SETTINGS = 3
+    HIGHSCORE = 4
 
 # Top parent class, responsible for variables needed to draw an object
-class Drawable_objects(pygame.sprite.Sprite):
+class DrawableObjects(pygame.sprite.Sprite):
     def __init__(self, color, image_path, width, height, pos):
         super().__init__()
         if image_path:
@@ -31,15 +38,15 @@ class Drawable_objects(pygame.sprite.Sprite):
             self.image.fill(color)
         self.rect = self.image.get_rect(topleft=pos)
 
-# Parent class. The child classes inherit from this which in turn inherits from Drawable_objects. Responsible for variables that move objects
-class Moving_objects(Drawable_objects):
+# Parent class. The child classes inherit from this which in turn inherits from DrawableObjects. Responsible for variables that move objects
+class MovingObjects(DrawableObjects):
     def __init__(self, color, image, width, height, pos):
         super().__init__(color, image, width, height, pos)
         self.speed = Vector2(0, 0)
         self.acceleration = Vector2(0, 0)
 
 # Player class. Holds the variables for the player object.
-class Player(Moving_objects):
+class Player(MovingObjects):
     def __init__(self, color, image, width, height, pos):
         super().__init__(color, image, width, height, pos)
         self.speed = Vector2(0, 0)
@@ -55,9 +62,9 @@ class Player(Moving_objects):
 
         # Horizontal movement (left and right)
         if keys[pygame.K_LEFT]:
-            self.speed.x = -5  # Move left
+            self.speed.x = -HORIZONTAL_SPEED  # Move left
         elif keys[pygame.K_RIGHT]:
-            self.speed.x = 5  # Move right
+            self.speed.x = HORIZONTAL_SPEED  # Move right
         else:
             self.speed.x = 0  # Stop horizontal movement if no key is pressed
 
@@ -66,10 +73,10 @@ class Player(Moving_objects):
         self.rect.y += self.speed.y
         self.rect.x += self.speed.x
         
-class Ravens(Moving_objects):
+class Ravens(MovingObjects):
     def __init__(self, color, image, width, height, pos):
         super().__init__(color, image, width, height, pos)
-        self.speed = Vector2(5, 0)  # Move right with a speed of 5 units per frame
+        self.speed = Vector2(HORIZONTAL_SPEED, 0)  # Move right with a speed of 5 units per frame
 
     def update(self):
         # Move the raven
@@ -80,23 +87,15 @@ class Ravens(Moving_objects):
             self.rect.right = 0
 
 # Platform class. Holds the variables for the platform object.
-class Platform(Drawable_objects):
+class Platform(DrawableObjects):
     def __init__(self, color, image_path, width, height, pos):
         super().__init__(color, image_path, width, height, pos)
-        if image_path:
-            self.image = pygame.image.load(image_path).convert_alpha()
-            self.image = pygame.transform.scale(self.image, (width, height))
-        else:
-            self.image = pygame.Surface((width, height), pygame.SRCALPHA)
-            if color:
-                self.image.fill(color)
-        self.rect = self.image.get_rect(topleft=pos)
-        
-class Floor(Drawable_objects):
+
+class Floor(DrawableObjects):
     def __init__(self, color, image_path, width, height, pos):
         super().__init__(color, image_path, width, height, pos)
         
-class Menu(Drawable_objects):
+class Menu(DrawableObjects):
     def __init__(self, game):
         self.game = game
         self.font = pygame.font.Font(None, FONT_SIZE)
@@ -262,6 +261,7 @@ class Game:
         self.background_image = pygame.transform.scale(self.background_image, (SCREEN_WIDTH, SCREEN_HEIGHT))
         self.font = pygame.font.Font(None, 36)
         self.highscore_menu = HighscoreMenu(self)
+        self.state = GameState.RUNNING
 
     def create_player(self):
         pos = Vector2(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 200)
@@ -330,14 +330,13 @@ class Game:
 
     def check_collisions(self):
         player = self.player.sprite
-        
 
         if player.speed.y >= 0:
             # Check collisions with the floor
             floor_hits = pygame.sprite.spritecollide(player, self.floors, False)
             for hit in floor_hits:
                 if player.rect.bottom <= hit.rect.top + player.speed.y:
-                    player.rect.y = hit.rect.top - PLAYER_HEIGHT
+                    player.rect.bottom = hit.rect.top
                     player.speed.y = 0
                     player.on_ground = True
 
@@ -348,17 +347,25 @@ class Game:
                     if hit not in self.collided_platforms:
                         self.collided_platforms.add(hit)
                         self.score += 1
-                    player.rect.y = hit.rect.top - PLAYER_HEIGHT
+                    player.rect.bottom = hit.rect.top
                     player.speed.y = 0
                     player.on_ground = True
 
-            # Check collisions with ravens
-            raven_hits = pygame.sprite.spritecollide(player, self.ravens, False)
-            for hit in raven_hits:
-                if player.rect.left <= hit.rect.right:
-                    self.highscore_menu.active = True
+        # Check collisions with ravens
+        raven_hits = pygame.sprite.spritecollide(player, self.ravens, False)
+        for hit in raven_hits:
+            if player.rect.left <= hit.rect.right:
+                self.highscore_menu.active = True 
 
-            
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.settings_active = not self.settings_active
+
     def update_game(self):
         self.screen.blit(self.background_image, (0, 0))
         self.all_sprites.update()
@@ -385,7 +392,6 @@ class Game:
         self.generate_platforms()
         self.create_player()
         global GRAVITY
-        
         
         # Load and play background music
         pygame.mixer.music.load('/home/magnus/dev/hoptovalhalla/hop_to_valhalla.mp3')
